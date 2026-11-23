@@ -113,6 +113,8 @@ with ProoflineClient() as client:
 
 Use `async for` with `AsyncProoflineClient`. Each yielded page retains its raw text, decoded rows, and metadata; CSV pages retain their individual headers. Pass `cursor=` to resume an export. Iteration stops only when the server omits the next cursor, including when an intermediate page has no rows. Empty or repeated continuation cursors raise `ProoflineError` with type `urn:proofline:sdk:invalid-pagination`, and the page that carries such a cursor is never yielded. The default bound is 100 pages; set `max_pages` to an integer from 1 to 1000. Exhausting that bound while a cursor remains raises `urn:proofline:sdk:pagination-limit`, so a partial export cannot silently appear complete. Stop iteration early when only a prefix is needed.
 
+Every page in one iteration must carry the same dataset version and settled-horizon header as the first page read. This also applies to empty pages. A mismatch raises `urn:proofline:sdk:invalid-pagination` before the iterator yields the mismatched page. When resuming with a cursor, compare the first returned page's metadata with the previous run's before appending its rows.
+
 ## Coverage uploads
 
 To upload coverage reports from CI, use a repository-restricted token with `coverage:write` and current repository write access. Name the full commit SHA that the tests ran on. Send 1 to 50 LCOV, Cobertura XML, JaCoCo XML, or Go cover reports in a JSON body of at most 30 MiB.
