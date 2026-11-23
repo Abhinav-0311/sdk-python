@@ -2036,6 +2036,58 @@ async def test_export_iterator_never_yields_the_page_with_an_invalid_cursor(
 
 
 @MODES
+@pytest.mark.parametrize("format", ["csv", "ndjson"])
+@pytest.mark.parametrize("continuation_has_rows", [False, True], ids=["empty", "nonempty"])
+@pytest.mark.parametrize(
+    ("second_version", "second_horizon"),
+    [(2, "2026-10-25T00:00:00Z"), (1, "2026-10-25T00:01:00Z")],
+    ids=["version-changed", "horizon-changed"],
+)
+async def test_export_iterator_rejects_changed_metadata_before_yielding(
+    mode: str, format: str, continuation_has_rows: bool, second_version: int, second_horizon: str
+) -> None:
+    def respond(request: Request, index: int) -> Reply:
+        version = 1 if index == 0 else second_version
+        horizon = "2026-10-25T00:00:00Z" if index == 0 else second_horizon
+        headers = {
+            "Content-Type": "text/csv" if format == "csv" else "application/x-ndjson",
+            "X-Proofline-Export-Version": str(version),
+            "X-Proofline-Export-Settled-Until": horizon,
+        }
+        query = parse_qs(urlsplit(request.path).query)
+        if index == 0:
+            assert "cursor" not in query
+            headers["X-Proofline-Export-Next-Cursor"] = "next-page"
+        else:
+            assert query["cursor"] == ["next-page"]
+        has_row = index > 0 and continuation_has_rows
+        if format == "csv":
+            body = b"dataset_version\r\n"
+            if has_row:
+                body += f"{version}\r\n".encode()
+        else:
+            body = f'{{"dataset_version":{version}}}\n'.encode() if has_row else b""
+        return Reply(body=body, headers=headers)
+
+    with Server(respond) as server:
+        async with session(mode, server.url) as client:
+            iterator = client.iter_export_pages(
+                ORG,
+                "findings",
+                from_time="2026-10-01T00:00:00Z",
+                to_time="2026-10-25T00:00:00Z",
+                format=format,
+            )
+            first = await next_export(iterator)
+            assert first.rows == []
+            assert first.next_cursor == "next-page"
+            with pytest.raises(ProoflineError) as raised:
+                await next_export(iterator)
+            assert raised.value.type == "urn:proofline:sdk:invalid-pagination"
+        assert len(server.requests) == 2
+
+
+@MODES
 @pytest.mark.parametrize(
     ("format", "content_type"),
     [
