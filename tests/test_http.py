@@ -2037,13 +2037,14 @@ async def test_export_iterator_never_yields_the_page_with_an_invalid_cursor(
 
 @MODES
 @pytest.mark.parametrize("format", ["csv", "ndjson"])
+@pytest.mark.parametrize("continuation_has_rows", [False, True], ids=["empty", "nonempty"])
 @pytest.mark.parametrize(
     ("second_version", "second_horizon"),
     [(2, "2026-10-25T00:00:00Z"), (1, "2026-10-25T00:01:00Z")],
     ids=["version-changed", "horizon-changed"],
 )
 async def test_export_iterator_rejects_changed_metadata_before_yielding(
-    mode: str, format: str, second_version: int, second_horizon: str
+    mode: str, format: str, continuation_has_rows: bool, second_version: int, second_horizon: str
 ) -> None:
     def respond(request: Request, index: int) -> Reply:
         version = 1 if index == 0 else second_version
@@ -2059,12 +2060,13 @@ async def test_export_iterator_rejects_changed_metadata_before_yielding(
             headers["X-Proofline-Export-Next-Cursor"] = "next-page"
         else:
             assert query["cursor"] == ["next-page"]
+        has_row = index > 0 and continuation_has_rows
         if format == "csv":
             body = b"dataset_version\r\n"
-            if index > 0:
+            if has_row:
                 body += f"{version}\r\n".encode()
         else:
-            body = b"" if index == 0 else f'{{"dataset_version":{version}}}\n'.encode()
+            body = f'{{"dataset_version":{version}}}\n'.encode() if has_row else b""
         return Reply(body=body, headers=headers)
 
     with Server(respond) as server:
